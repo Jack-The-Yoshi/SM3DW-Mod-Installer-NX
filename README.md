@@ -81,10 +81,9 @@ sdmc:/switch/
 
 3. Paste this into the command prompt to build:
 
+```bash
 git clone https://github.com/YOUR_USERNAME/SM3DW-Mod-Installer-NX.git
-
 cd SM3DW-Mod-Installer-NX
-
 make
 
 The compiled .nro will be located in the project folder.
