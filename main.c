@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <errno.h>
+#include <switch/applets/swkbd.h>
 #include "miniz.h"
 
 #include <curl/curl.h>
@@ -36,6 +37,33 @@ static void clearScreen(void);
 static int jsoneq(const char *json, const jsmntok_t *tok, const char *s);
 
 PadState pad;
+
+static int show_search_keyboard(char *outBuf, size_t outSize)
+{
+    SwkbdConfig kbd;
+    Result rc = swkbdCreate(&kbd, 0);
+
+    if (R_FAILED(rc))
+        return -1;
+
+    swkbdConfigMakePresetDefault(&kbd);
+    swkbdConfigSetGuideText(&kbd, "Enter mod search term");
+    swkbdConfigSetHeaderText(&kbd, "Search GameBanana Mods");
+    swkbdConfigSetInitialText(&kbd, "");
+    swkbdConfigSetStringLenMax(&kbd, outSize - 1);
+
+    rc = swkbdShow(&kbd, outBuf, outSize);
+
+    swkbdClose(&kbd);
+
+    if (R_FAILED(rc))
+        return -1;
+
+    if (strlen(outBuf) == 0)
+        return -1;
+
+    return 0;
+}
 
 typedef struct {
     const char *name;
@@ -854,59 +882,179 @@ static void ensure_dirs(void) {
     mkdir_p(TARGET_EXEFS);
 }
 
+static int contains_ignore_case(const char *text, const char *search)
+{
+    if (!text || !search) return 0;
+
+    size_t searchLen = strlen(search);
+    if (searchLen == 0) return 1;
+
+    for (size_t i = 0; text[i]; i++)
+    {
+        size_t j = 0;
+        while (text[i + j] &&
+               tolower((unsigned char)text[i + j]) ==
+               tolower((unsigned char)search[j]))
+        {
+            j++;
+            if (j == searchLen)
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
 // -----------------------------
 // Main screens
 // -----------------------------
-static int mod_list_screen(int sectionId) {
+static int mod_list_screen(int sectionId)
+{
     int page = 1;
     int sel = 0;
 
-    while (appletMainLoop()) {
+    char searchQuery[256] = {0};
+    int searchMode = 0;
 
+    while (appletMainLoop())
+    {
+        ModItem allMods[MAX_MODS_PER_PAGE];
         ModItem mods[MAX_MODS_PER_PAGE];
+
+        memset(allMods, 0, sizeof(allMods));
         memset(mods, 0, sizeof(mods));
 
         clearScreen();
         printf("SM3DW Mod Installer NX\n");
         printf("Target: %s\n\n", TARGET_BASE);
-        printf("Loading mods (page %d)...\n", page);
+
+        if (searchMode)
+            printf("Search: \"%s\" (page %d)\n\n", searchQuery, page);
+        else
+            printf("Category Mods (page %d)\n\n", page);
+
         consoleUpdate(NULL);
 
-        int modCount = fetch_mods_api_v11(sectionId, page, mods, MAX_MODS_PER_PAGE);
-        if (modCount < 0) modCount = 0;
+        int fetchedCount = fetch_mods_api_v11(sectionId,
+                                              page,
+                                              allMods,
+                                              MAX_MODS_PER_PAGE);
+
+        if (fetchedCount < 0)
+            fetchedCount = 0;
+
+        int modCount = 0;
+
+        if (searchMode)
+        {
+            for (int i = 0; i < fetchedCount; i++)
+            {
+                if (contains_ignore_case(allMods[i].name, searchQuery))
+                {
+                    mods[modCount++] = allMods[i];
+                }
+            }
+        }
+        else
+        {
+            memcpy(mods, allMods, sizeof(ModItem) * fetchedCount);
+            modCount = fetchedCount;
+        }
 
         if (sel >= modCount)
             sel = (modCount > 0) ? (modCount - 1) : 0;
 
-        while (appletMainLoop()) {
-
+        while (appletMainLoop())
+        {
             padUpdate(&pad);
             u64 kd = padGetButtonsDown(&pad);
 
-            if (kd & HidNpadButton_Plus) return 0;
-            if (kd & HidNpadButton_L) { if (page > 1) { page--; sel = 0; break; } }
-            if (kd & HidNpadButton_R) { page++; sel = 0; break; }
-            if (kd & HidNpadButton_X) { break; }
+            if (kd & HidNpadButton_Plus)
+                return 0;
 
-            if (modCount == 0) {
+            if (kd & HidNpadButton_L)
+            {
+                if (page > 1)
+                {
+                    page--;
+                    sel = 0;
+                    break;
+                }
+            }
+
+            if (kd & HidNpadButton_R)
+            {
+                page++;
+                sel = 0;
+                break;
+            }
+
+            if (kd & HidNpadButton_X)
+            {
+                break;
+            }
+
+            if (kd & HidNpadButton_Y)
+            {
+                if (searchMode)
+                {
+                    searchMode = 0;
+                    searchQuery[0] = 0;
+                    page = 1;
+                    sel = 0;
+                    break;
+                }
+                else
+                {
+                    if (show_search_keyboard(searchQuery,
+                                             sizeof(searchQuery)) == 0)
+                    {
+                        if (strlen(searchQuery) > 0)
+                        {
+                            searchMode = 1;
+                            page = 1;
+                            sel = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (modCount == 0)
+            {
                 clearScreen();
                 printf("SM3DW Mod Installer NX\n\n");
-                printf("No mods found (page %d).\n", page);
-                printf("Press L/R to change page, X to retry, + to exit.\n");
+
+                if (searchMode)
+                    printf("No search results found.\n\n");
+                else
+                    printf("No mods found.\n\n");
+
+                printf("Y = search | L/R = page | X = refresh | + = exit\n");
                 consoleUpdate(NULL);
                 svcSleepThread(10000000);
                 continue;
             }
 
-            if (kd & HidNpadButton_Down) { if (sel < modCount - 1) sel++; }
-            if (kd & HidNpadButton_Up)   { if (sel > 0) sel--; }
+            if (kd & HidNpadButton_Down)
+            {
+                if (sel < modCount - 1)
+                    sel++;
+            }
 
-            if (mods[sel].version[0] == 0) {
+            if (kd & HidNpadButton_Up)
+            {
+                if (sel > 0)
+                    sel--;
+            }
+
+            if (mods[sel].version[0] == 0)
+            {
                 fetch_mod_metadata(mods[sel].id, &mods[sel]);
             }
 
-            if (kd & HidNpadButton_A) {
-
+            if (kd & HidNpadButton_A)
+            {
                 int modId = mods[sel].id;
 
                 ModFile files[MAX_FILES_PER_MOD];
@@ -918,20 +1066,28 @@ static int mod_list_screen(int sectionId) {
                 printf("ID: %d\n\n", modId);
                 consoleUpdate(NULL);
 
-                int fileCount = fetch_mod_files_api_v11(modId, files, MAX_FILES_PER_MOD);
-                if (fileCount < 0) fileCount = 0;
+                int fileCount = fetch_mod_files_api_v11(modId,
+                                                        files,
+                                                        MAX_FILES_PER_MOD);
+
+                if (fileCount < 0)
+                    fileCount = 0;
 
                 int fileSel = 0;
 
-                while (appletMainLoop()) {
-
+                while (appletMainLoop())
+                {
                     padUpdate(&pad);
                     u64 k2 = padGetButtonsDown(&pad);
 
-                    if (k2 & HidNpadButton_Plus) return 0;
-                    if (k2 & HidNpadButton_B) break;
+                    if (k2 & HidNpadButton_Plus)
+                        return 0;
 
-                    if (fileCount == 0) {
+                    if (k2 & HidNpadButton_B)
+                        break;
+
+                    if (fileCount == 0)
+                    {
                         clearScreen();
                         printf("Mod: %s\n\n", mods[sel].name);
                         printf("No downloadable files found.\n");
@@ -941,11 +1097,20 @@ static int mod_list_screen(int sectionId) {
                         continue;
                     }
 
-                    if (k2 & HidNpadButton_Down) { if (fileSel < fileCount - 1) fileSel++; }
-                    if (k2 & HidNpadButton_Up)   { if (fileSel > 0) fileSel--; }
+                    if (k2 & HidNpadButton_Down)
+                    {
+                        if (fileSel < fileCount - 1)
+                            fileSel++;
+                    }
 
-                    if (k2 & HidNpadButton_A) {
+                    if (k2 & HidNpadButton_Up)
+                    {
+                        if (fileSel > 0)
+                            fileSel--;
+                    }
 
+                    if (k2 & HidNpadButton_A)
+                    {
                         const ModFile *f = &files[fileSel];
 
                         char outPath[MAX_PATH_LEN];
@@ -962,9 +1127,12 @@ static int mod_list_screen(int sectionId) {
                         printf("%s\n\n", f->filename);
                         consoleUpdate(NULL);
 
-                        int dlRes = http_download_file(f->url, outPath, &pr);
+                        int dlRes = http_download_file(f->url,
+                                                       outPath,
+                                                       &pr);
 
-                        if (dlRes != 0) {
+                        if (dlRes != 0)
+                        {
                             printf("\nDownload failed.\n");
                             consoleUpdate(NULL);
                             svcSleepThread(1500000000);
@@ -981,11 +1149,14 @@ static int mod_list_screen(int sectionId) {
                         printf("\nPress B to go back.\n");
                         consoleUpdate(NULL);
 
-                        while (appletMainLoop()) {
+                        while (appletMainLoop())
+                        {
                             padUpdate(&pad);
                             u64 k3 = padGetButtonsDown(&pad);
-                            if (k3 & HidNpadButton_B) break;
-                            if (k3 & HidNpadButton_Plus) return 0;
+                            if (k3 & HidNpadButton_B)
+                                break;
+                            if (k3 & HidNpadButton_Plus)
+                                return 0;
                             svcSleepThread(10000000);
                         }
                     }
@@ -994,7 +1165,8 @@ static int mod_list_screen(int sectionId) {
                     printf("Mod: %s\n\n", mods[sel].name);
                     printf("Files:\n\n");
 
-                    for (int i = 0; i < fileCount; i++) {
+                    for (int i = 0; i < fileCount; i++)
+                    {
                         printf("%c %s\n",
                                (i == fileSel) ? '>' : ' ',
                                files[i].filename);
@@ -1004,15 +1176,19 @@ static int mod_list_screen(int sectionId) {
 
                     char fullDesc[2048] = {0};
 
-                    if (fetch_full_description(modId, fullDesc, sizeof(fullDesc)) == 0) {
+                    if (fetch_full_description(modId,
+                                               fullDesc,
+                                               sizeof(fullDesc)) == 0)
+                    {
                         printf("Description:\n\n");
                         printf("%s\n", fullDesc);
-                    } else {
+                    }
+                    else
+                    {
                         printf("Description: (not available)\n");
                     }
 
                     printf("\nA = download | B = back | + = exit\n");
-
                     consoleUpdate(NULL);
                     svcSleepThread(10000000);
                 }
@@ -1020,8 +1196,18 @@ static int mod_list_screen(int sectionId) {
 
             clearScreen();
             printf("SM3DW Mod Installer NX\n");
-            printf("Category Mods (page %d) — %d mods loaded\n\n", page, modCount);
-            printf("A = open | L/R = page | X = refresh | + = exit\n\n");
+
+            if (searchMode)
+                printf("Search: \"%s\" (page %d) - %d results\n\n",
+                       searchQuery,
+                       page,
+                       modCount);
+            else
+                printf("Category Mods (page %d) - %d mods loaded\n\n",
+                       page,
+                       modCount);
+
+            printf("A = open | Y = search | L/R = page | X = refresh | + = exit\n\n");
 
             int start = 0;
             if (sel >= UI_VISIBLE)
@@ -1031,13 +1217,14 @@ static int mod_list_screen(int sectionId) {
             if (end > modCount)
                 end = modCount;
 
-            for (int i = start; i < end; i++) {
-
+            for (int i = start; i < end; i++)
+            {
                 printf("%c %s\n",
                        (i == sel) ? '>' : ' ',
                        mods[i].name);
 
-                if (i == sel) {
+                if (i == sel)
+                {
                     printf("   Author: %s\n",
                            mods[i].author[0] ? mods[i].author : "Unknown");
 
@@ -1047,7 +1234,9 @@ static int mod_list_screen(int sectionId) {
                     printf("   Likes: %d   Views: %d\n\n",
                            mods[i].likeCount,
                            mods[i].viewCount);
-                } else {
+                }
+                else
+                {
                     printf("\n");
                 }
             }
