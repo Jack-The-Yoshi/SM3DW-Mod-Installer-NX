@@ -79,11 +79,11 @@ sdmc:/switch/
 
 2. Ensure `DEVKITPRO` environment variable is set.
 
-3. Clone this repository:
+3. Paste this into the command prompt to build:
 
 git clone https://github.com/YOUR_USERNAME/SM3DW-Mod-Installer-NX.git
+
 cd SM3DW-Mod-Installer-NX
-Build the project:
 
 make
 
