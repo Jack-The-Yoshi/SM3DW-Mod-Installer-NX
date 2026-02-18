@@ -19,6 +19,7 @@ This app connects to the official GameBanana API, lets you browse categories, vi
 - View mod descriptions
 - Download mod files directly from GameBanana
 - Automatic ZIP extraction
+- Search feature
 - Automatic detection of:
   - `romfs`
   - `exefs`
@@ -42,6 +43,7 @@ sdmc:/atmosphere/contents/010028600EBDA000/
 | L / R | Change page |
 | X | Refresh |
 | + | Exit |
+| Y | Search/Clear search |
 
 ---
 
@@ -147,14 +149,10 @@ This project is not affiliated with Nintendo, GameBanana, or the Super Mario fra
 ### Known Limitations
 ZIP archives only (RAR not yet supported)
 
-No search feature
-
 Console-based UI only
 
 ### Planned Features
 RAR support
-
-Search function
 
 Sorting (Most liked / Most viewed)
 
