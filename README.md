@@ -85,7 +85,7 @@ sdmc:/switch/
 git clone https://github.com/YOUR_USERNAME/SM3DW-Mod-Installer-NX.git
 cd SM3DW-Mod-Installer-NX
 make
-```bash
+```
 
 The compiled .nro will be located in the project folder.
 
