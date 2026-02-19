@@ -84,7 +84,7 @@ sdmc:/switch/
 3. Paste this into the command prompt to build:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/SM3DW-Mod-Installer-NX.git
+git clone https://github.com/Jack-The-Yoshi/SM3DW-Mod-Installer-NX.git
 cd SM3DW-Mod-Installer-NX
 make
 ```
